@@ -1,0 +1,169 @@
+---
+title: Insects classification
+authors:
+- Partha
+tags:
+- RAMP
+- ConvNets
+- Challenge
+created_at: 2016-11-08 00:00:00
+updated_at: 2016-12-11 13:45:43.410725
+tldr: Insect classification challenge
+---
+
+```python
+from __future__ import print_function
+
+from keras.preprocessing.image import ImageDataGenerator
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Activation, Flatten
+from keras.layers import Convolution2D, MaxPooling2D
+from keras.regularizers import l2, activity_l2
+from keras.optimizers import SGD
+from keras.utils import np_utils
+from keras.layers.normalization import BatchNormalization
+#from keras.layers.normalization import LRN2D
+import pandas as pd
+import numpy as np
+
+batch_size = 64
+#nb_classes = 10
+nb_epoch = 50
+data_augmentation = True
+
+# input image dimensions
+img_rows, img_cols = 64, 64
+#RGB colors
+img_channels = 3
+
+# the data, shuffled and split between train and test sets
+
+data = np.load("train_64x64.npz")
+X, r = data['X'], data['y']
+uni_val = pd.Series(r).unique()
+nb_classes = len(uni_val)
+for i in range(0,len(r)):
+    for j in range(0,len(uni_val)):
+        if r[i] == uni_val[j]:
+            r[i]=j
+        
+        
+y=np.array([r]).T
+
+#labels = pd.read_table("taxon_id_to_french_names.txt", sep="\s{2,}", 
+#                       names=["name", "taxon_id"], 
+#                       index_col="taxon_id")
+#y_names = pd.Series(y).map(labels["name"].to_dict())
+
+# creating a sample test set #
+msk = np.random.rand(len(X)) < 0.9
+X_train = X[msk]
+X_test = X[~msk]
+y_train = y[msk]
+y_test = y[~msk]
+
+print('X_train shape:', X_train.shape)
+print(X_train.shape[0], 'train samples')
+print(X_test.shape[0], 'test samples')
+
+# convert class vectors to binary class matrices
+Y_train = np_utils.to_categorical(y_train, nb_classes)
+Y_test = np_utils.to_categorical(y_test, nb_classes)
+
+
+model = Sequential()
+# Incorporate  Translational invariant into the system convolution + max pooling is used
+model.add(Convolution2D(64*2, 7, 7, border_mode='same', input_shape=X_train.shape[1:]))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+#model.add(LRN2D())
+
+model.add(Dropout(0.25)) # prevent overfitting 
+
+model.add(Convolution2D(64, 5, 5))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+#model.add(LRN2D())
+
+model.add(Dropout(0.25)) # prevent overfitting 
+
+model.add(Convolution2D(64*2, 3, 3, border_mode='same'))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Convolution2D(64, 3, 3))
+model.add(Activation('relu'))
+#model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Convolution2D(64, 3, 3))
+model.add(Activation('relu'))
+model.add(MaxPooling2D(pool_size=(2, 2)))
+model.add(Dropout(0.25))
+
+model.add(Flatten()) 
+## ** l2 regulisation is employed to discard the effect of overfitting ****
+model.add(Dense(512,init='uniform',input_dim=64,W_regularizer=l2(0.01), activity_regularizer=activity_l2(0.01)))
+#model.add(BatchNormalization())
+model.add(Activation('relu'))
+model.add(Dense(512,W_regularizer=l2(0.01), activity_regularizer=activity_l2(0.01)))
+#model.add(BatchNormalization())
+model.add(Activation('relu'))
+
+model.add(Dropout(0.5))
+model.add(Dense(nb_classes,init='uniform'))
+model.add(Activation('softmax')) # classification layer
+
+# let's train the model using SGD + momentum (how original).
+sgd = SGD(lr=0.01, decay=1e-6, momentum=0.9, nesterov=True)
+model.compile(loss='categorical_crossentropy',
+              optimizer=sgd,
+              metrics=['accuracy'])
+
+X_train = X_train.astype('float32')
+X_test = X_test.astype('float32')
+X_train /= 255
+X_test /= 255
+
+if not data_augmentation:
+    print('Not using data augmentation.')
+    model.fit(X_train, Y_train,
+              batch_size=batch_size,
+              nb_epoch=nb_epoch,
+              validation_data=(X_test, Y_test),
+              shuffle=True)
+else:
+    print('Using real-time data augmentation.')
+    # ****To prevent overfitting the model*****
+    # this will do preprocessing and realtime data augmentation 
+    datagen = ImageDataGenerator(
+        featurewise_center=False,  # set input mean to 0 over the dataset
+        samplewise_center=False,  # set each sample mean to 0
+        featurewise_std_normalization=False,  # divide inputs by std of the dataset
+        samplewise_std_normalization=False,  # divide each input by its std
+        zca_whitening=False,  # apply ZCA whitening
+        rotation_range=0,  # randomly rotate images in the range (degrees, 0 to 180)
+        width_shift_range=0.1,  # randomly shift images horizontally (fraction of total width)
+        height_shift_range=0.1,  # randomly shift images vertically (fraction of total height)
+        horizontal_flip=True,  # randomly flip images
+        vertical_flip=False)  # randomly flip images
+
+    # compute quantities required for featurewise normalization
+    # (std, mean, and principal components if ZCA whitening is applied)
+    datagen.fit(X_train)
+
+    # fit the model on the batches generated by datagen.flow()
+    model.fit_generator(datagen.flow(X_train, Y_train,
+                        batch_size=batch_size),
+                        samples_per_epoch=X_train.shape[0],
+                        nb_epoch=nb_epoch,
+validation_data=(X_test, Y_test))
+```
+    X_train shape: (18311, 64, 64, 3)
+    18311 train samples
+    2037 test samples
+    Using real-time data augmentation.
+    Epoch 1/50
+     1344/18311 [=>............................] - ETA: 935s - loss: 8.1425 - acc: 0.2723
+
+
+```python
+
+```
